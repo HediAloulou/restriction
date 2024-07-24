@@ -18,6 +18,7 @@ public class MyVPNService extends VpnService {
 
     private static final String TAG = "MyVPNService";
     private static final Set<String> blockedUrls = new HashSet<>();
+    private static final Set<String> disallowedApplications = new HashSet<>();
     private ParcelFileDescriptor vpnInterface;
     private Thread mThread;
     private boolean isRunning = false;
@@ -30,6 +31,17 @@ public class MyVPNService extends VpnService {
                 Builder builder = new Builder();
                 builder.addAddress("10.0.0.2", 32);
                 builder.addRoute("0.0.0.0", 0);
+
+                // Add disallowed applications
+                for (String app : disallowedApplications) {
+                    try {
+                        builder.addDisallowedApplication(app);
+                        Log.d(TAG, "Disallowed application added: " + app);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error adding disallowed application: " + app, e);
+                    }
+                }
+
                 vpnInterface = builder.setSession("MyVPNService").establish();
 
                 // Print blocked URLs for debugging
@@ -96,6 +108,14 @@ public class MyVPNService extends VpnService {
         blockedUrls.clear();
         for (String url : urls) {
             blockedUrls.add(url);
+        }
+    }
+
+    // Method to set disallowed applications
+    public static void setDisallowedApplications(String[] apps) {
+        disallowedApplications.clear();
+        for (String app : apps) {
+            disallowedApplications.add(app);
         }
     }
 }

@@ -1,21 +1,31 @@
 package com.example.restricted_app;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
-import android.net.VpnService;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.res.AssetFileDescriptor;
 import android.os.Bundle;
-import android.view.View;
-import android.webkit.WebView;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-public class MainActivity extends AppCompatActivity {
+import org.tensorflow.lite.Interpreter;
 
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+
+public class MainActivity extends AppCompatActivity {
+    private Interpreter tflite;
     private TextView resultTextView;
-    private Button startButton;
-    private WebView webView;
+    private BroadcastReceiver sensorDataReceiver;
+    private SharedPreferences sharedPreferences;
+    private boolean isVPNRunning = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -23,49 +33,85 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         resultTextView = findViewById(R.id.resultTextView);
-        startButton = findViewById(R.id.startButton);
-        webView = findViewById(R.id.webView);
+        Button startButton = findViewById(R.id.startButton);
+        sharedPreferences = getSharedPreferences("com.example.prediction", MODE_PRIVATE);
 
-        startButton.setOnClickListener(v -> handleVPNActivation("Kid"));
+        try {
+            tflite = new Interpreter(loadModelFile());
+        } catch (IOException e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Model loading failed", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        sensorDataReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                float[] calculatedValues = intent.getFloatArrayExtra("calculatedValues");
+                if (calculatedValues != null) {
+                    float[] predictionResult = makePrediction(calculatedValues);
+                    String result = predictionResult[0] > 0.5 ? "Kid" : "Adult"; // Example threshold of 0.5 for binary classification
+                    sharedPreferences.edit().putString("predictionResult", result).apply();
+                    resultTextView.setText("Prediction Result: " + result);
+                    handleVPNActivation(result);
+                }
+            }
+        };
+
+        IntentFilter filter = new IntentFilter("com.example.prediction.SENSOR_VALUES");
+        registerReceiver(sensorDataReceiver, filter);
+
+        startButton.setOnClickListener(v -> {
+            // Start sensor service
+            Intent sensorServiceIntent = new Intent(MainActivity.this, SensorService.class);
+            startService(sensorServiceIntent);
+        });
+    }
+
+    private MappedByteBuffer loadModelFile() throws IOException {
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("model_tf_3.tflite");
+        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
+        FileChannel fileChannel = inputStream.getChannel();
+        long startOffset = fileDescriptor.getStartOffset();
+        long declaredLength = fileDescriptor.getDeclaredLength();
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
+    }
+
+    private float[] makePrediction(float[] inputValues) {
+        float[][] outputValues = new float[1][1];
+        tflite.run(inputValues, outputValues);
+        return outputValues[0];
     }
 
     private void handleVPNActivation(String result) {
         if ("Kid".equals(result)) {
             startVPNService();
-            MyVPNService.setBlockedUrls(new String[]{
-                    "www.youtube.com",
-                    "www.facebook.com"
-            });
+            MyVPNService.setBlockedUrls(new String[]{"www.facebook.com", "www.youtube.com", "www.g9g.com"});
             Toast.makeText(this, "VPN for parental control activated", Toast.LENGTH_SHORT).show();
-            // Show WebView if needed
-            webView.setVisibility(View.VISIBLE);
         } else {
             stopVPNService();
-            // Hide WebView
-            webView.setVisibility(View.GONE);
         }
     }
 
     private void startVPNService() {
-        Intent intent = VpnService.prepare(this);
-        if (intent != null) {
-            startActivityForResult(intent, 0);
-        } else {
-            onActivityResult(0, RESULT_OK, null);
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode == RESULT_OK) {
-            Intent intent = new Intent(this, MyVPNService.class);
-            startService(intent);
+        if (!isVPNRunning) {
+            Intent vpnIntent = new Intent(MainActivity.this, MyVPNService.class);
+            startService(vpnIntent);
+            isVPNRunning = true;
         }
     }
 
     private void stopVPNService() {
-        Intent intent = new Intent(this, MyVPNService.class);
-        stopService(intent);
+        if (isVPNRunning) {
+            Intent vpnIntent = new Intent(MainActivity.this, MyVPNService.class);
+            stopService(vpnIntent);
+            isVPNRunning = false;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        unregisterReceiver(sensorDataReceiver);
     }
 }

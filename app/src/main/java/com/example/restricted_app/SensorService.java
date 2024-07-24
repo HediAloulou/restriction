@@ -23,10 +23,10 @@ import java.util.List;
 
 public class SensorService extends Service implements SensorEventListener {
     private SensorManager sensorManager;
-    private Sensor rotationSensor, linearAccelerationSensor;
+    private Sensor rotationSensor, linearAccelerationSensor,gyroscopeVectorSensor;
     private final int MEASUREMENT_DURATION = 15000; // 15 seconds
     private long startTime;
-    private List<Float> roYValues, laZValues, roXValues, roZValues, laXValues, roMagValues, laMagValues, laYValues;
+    private List<Float> roYValues, laZValues, roXValues, roZValues, laXValues, roMagValues, laMagValues, laYValues,gyXvalues,gyYvalues,gyZvalues,gyMagvalues;
     private static final String CHANNEL_ID = "SensorServiceChannel";
 
     @SuppressLint("ForegroundServiceType")
@@ -36,7 +36,7 @@ public class SensorService extends Service implements SensorEventListener {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         linearAccelerationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
-
+        gyroscopeVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
         roYValues = new ArrayList<>();
         laZValues = new ArrayList<>();
         roXValues = new ArrayList<>();
@@ -45,6 +45,12 @@ public class SensorService extends Service implements SensorEventListener {
         roMagValues = new ArrayList<>();
         laMagValues = new ArrayList<>();
         laYValues = new ArrayList<>();
+        gyXvalues =new ArrayList<>();
+        gyYvalues =new ArrayList<>();
+        gyZvalues =new ArrayList<>();
+        gyMagvalues =new ArrayList<>();
+
+
 
         createNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -58,6 +64,8 @@ public class SensorService extends Service implements SensorEventListener {
     public int onStartCommand(Intent intent, int flags, int startId) {
         sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_NORMAL);
         sensorManager.registerListener(this, linearAccelerationSensor, SensorManager.SENSOR_DELAY_NORMAL);
+        sensorManager.registerListener(this, gyroscopeVectorSensor, SensorManager.SENSOR_DELAY_NORMAL);
+
         startTime = System.currentTimeMillis();
 
         new Handler().postDelayed(this::calculateAndSendResult, MEASUREMENT_DURATION);
@@ -73,40 +81,60 @@ public class SensorService extends Service implements SensorEventListener {
             roXValues.add(event.values[0]);
             roZValues.add(event.values[2]);
             roMagValues.add(calculateMagnitude(event.values));
-        } else if (event.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION) {
+        }
+        if (event.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION) {
             laZValues.add(event.values[2]);
             laXValues.add(event.values[0]);
             laYValues.add(event.values[1]);
             laMagValues.add(calculateMagnitude(event.values));
         }
+        else if(event.sensor.getType() == Sensor.TYPE_GYROSCOPE)
+        {
+            gyZvalues.add(event.values[2]);
+            gyXvalues.add(event.values[0]);
+            gyYvalues.add(event.values[1]);
+            gyMagvalues.add(calculateMagnitude(event.values));
+        }
     }
 
     private void calculateAndSendResult() {
         float roYMax = Collections.max(roYValues);
+        float roXRmse = calculateRMSE(roXValues);
+        float roYRmse = calculateRMSE(roYValues);
         float roYMin = Collections.min(roYValues);
         float roYMean = calculateMean(roYValues);
         float laZMean = calculateMean(laZValues);
-        float roXMax = Collections.max(roXValues);
+        float laZRmse = calculateRMSE(laZValues);
+        float laZMax = Collections.max(laZValues);
         float roXMin = Collections.min(roXValues);
         float roZMax = Collections.max(roZValues);
         float roXMean = calculateMean(roXValues);
         float laXMean = calculateMean(laXValues);
-        float roZMin = Collections.min(roZValues);
         float roZMean = calculateMean(roZValues);
-        float roMagMean = calculateMean(roMagValues);
-        float roMagMin = Collections.min(roMagValues);
         float roMagMax = Collections.max(roMagValues);
         float laMagMean = calculateMean(laMagValues);
-        float laYMean = calculateMean(laYValues);
+        float laMagRmse = calculateRMSE(laMagValues);
+        float laYRmse = calculateRMSE(laYValues);
+        float laMagStd = calculateStandardDeviation(laMagValues);
         float laXMin = Collections.min(laXValues);
-        float laMagMin = Collections.min(laMagValues);
-        float roMagStd = calculateStandardDeviation(roMagValues);
         float roMagRmse = calculateRMSE(roMagValues);
+        float gyYStd=calculateStandardDeviation(gyYvalues);
+        float gyYRmse=calculateRMSE(gyYvalues);
+        // float laMagMin = Collections.min(laMagValues);
+        //  float roZMin = Collections.min(roZValues);
+        // float roMagMean = calculateMean(roMagValues);
+        //  float roMagMin = Collections.min(roMagValues);
+        //float roMagStd = calculateStandardDeviation(roMagValues);
+        //float laYMean = calculateMean(laYValues);
 
         float[] calculatedValues = {
-                roYMax, roYMin, roYMean, laZMean, roXMax, roXMin, roZMax, roXMean, laXMean, roZMin,
-                roZMean, roMagMean, roMagMin, roMagMax, laMagMean, laYMean, laXMin, laMagMin,
-                roMagStd, roMagRmse
+                roYMax, laZMean, roYMean, laZRmse, roXRmse,
+                laMagMean, laXMin, roYMin, roYRmse, laXMean,
+                roXMean, roZMax, laMagStd, roXMin, gyYStd,
+                laZMax, laMagRmse, laYRmse, gyYRmse, roMagMax,
+                roZMean, roMagRmse
+
+
         };
 
         // Broadcast calculated values
